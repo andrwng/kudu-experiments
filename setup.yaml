@@ -1,0 +1,36 @@
+# The base opts.
+base_opts:
+  # Path to find kudu-tserver, kudu-master.
+  # If empty, these binaries should be on your $PATH
+  kudu_sbin_dir: ""
+
+  # Path to scripts to run as the workload.
+  # Each workload will be run.
+  workloads:
+    inserts:
+      script: ""
+      metrics: ""
+
+clusters:
+  va1022:
+    cred_file: ""
+
+    masters:
+      addresses:
+        - "va1022.halxg.cloudera.com"
+      setup_script: ""
+      dir_flags:
+        fs_wal_dir: "/data/1/awong/exp"
+        fs_metadata_dir: "/data/1/awong/exp"
+        fs_data_dirs: "/data/2/awong/exp"
+
+    tservers:
+      addresses:
+        - "va1022.halxg.cloudera.com"
+      setup_script: ""
+      dir_flags:
+        fs_wal_dir: "/data/3/awong/exp"
+        fs_metadata_dir: "/data/3/awong/exp"
+        fs_data_dirs: "/data/4/awong/exp"
+      # TODO: add matrix of flags
+
