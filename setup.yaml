@@ -1,6 +1,6 @@
 # The base opts.
 base_opts:
-  # Path to find kudu-tserver, kudu-master.
+  # Local path to find kudu-tserver, kudu-master.
   # If empty, these binaries should be on your $PATH
   kudu_sbin_dir: ""
 
@@ -12,13 +12,17 @@ base_opts:
       metrics: ""
 
 clusters:
-  va1022:
-    cred_file: ""
-
+  va1022-only:
     masters:
+      # Addresses of the servers.
       addresses:
         - "va1022.halxg.cloudera.com"
+
+      # Local path to any setup script.
       setup_script: ""
+
+      # Directory in which to put binaries.
+      sbin_dir: "/data/8/awong/exp"
       dir_flags:
         fs_wal_dir: "/data/1/awong/exp"
         fs_metadata_dir: "/data/1/awong/exp"
@@ -28,9 +32,9 @@ clusters:
       addresses:
         - "va1022.halxg.cloudera.com"
       setup_script: ""
+      sbin_dir: "/data/8/awong/exp"
       dir_flags:
         fs_wal_dir: "/data/3/awong/exp"
         fs_metadata_dir: "/data/3/awong/exp"
         fs_data_dirs: "/data/4/awong/exp"
-      # TODO: add matrix of flags
 
