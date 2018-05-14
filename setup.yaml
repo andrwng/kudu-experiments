@@ -1,7 +1,7 @@
 # The base opts.
 base_opts:
-  # Local path to find kudu-tserver, kudu-master.
-  # If empty, these binaries should be on your $PATH
+  # Local path to find kudu-tserver, kudu-master, and kudu binaries. This is to
+  # your $PATH. If empty, these binaries should already be on your $PATH.
   kudu_sbin_dir: "/data/8/awong/Repositories/kudu/build/latest/bin"
 
   # The interval at which metrics are polled from Kudu.

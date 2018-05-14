@@ -30,14 +30,16 @@ import urllib2
 import yaml
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-
+BASE_OPTS = None
 
 class Servers(object):
-    def __init__(self, server_config, secrets):
+    def __init__(self, bin_type, server_config, secrets):
+        self.bin_type = bin_type
         self.config = server_config
         self.secrets = secrets
         self.addresses = self.config['addresses']
         self.setup_script = None
+        self.remote_binary = None
         if len(self.config['setup_script']) > 0:
             self.setup_script = os.path.abspath(self.config['setup_script'])
         self.flags = []
@@ -52,9 +54,10 @@ class Servers(object):
 
     # Create clients to connect with each server.
     #
-    # Create necessary directories on each server and send over any scripts
-    # that may need running.
+    # Create necessary directories on each server and send over any scripts or
+    # binaries that may need running.
     def setup(self):
+        # Connect to each address.
         self.clients = {}
         for addr in self.addresses:
             logging.info("Connecting to server {}".format(addr))
@@ -72,23 +75,27 @@ class Servers(object):
                 logging.info("No secrets listed for server")
                 client.connect(hostname=addr)
             logging.info("Connected to server {}".format(addr))
+            self.clients[addr] = client
 
             # Create any directories we might need.
             stdin, stdout, stderr = client.exec_command("mkdir -p {}".format(" ".join(self.dirs)))
-            self.clients[addr] = client
 
         # Send over the setup script and run setup.
         if self.setup_script:
-            self.distribute_file(self.setup_script, self.remote_working_dir)
+            self.distribute_file(self.setup_script)
 
-    # Runs the given binary file, located in the remote working directories,
-    # across all servers.
-    def start(self, bin_file, flags, port):
+        # Distribute the binary file.
+        self.remote_binary = self.distribute_file(
+            os.path.join(BASE_OPTS['kudu_sbin_dir'], self.bin_type))
+
+
+    # Runs the binary files across all servers.
+    def start(self, flags, port):
         for addr in self.addresses:
             logging.info("Starting daemon on server {}".format(addr))
             client = self.clients[addr]
             stdin, stdout, stderr = client.exec_command(
-                "{} {}".format(self.remote_file(bin_file)), flags)
+                "{} {}".format(self.remote_binary), flags)
 
             # Wait for the server to come online.
             for x in xrange(60):
@@ -102,12 +109,12 @@ class Servers(object):
                     time.sleep(1)
                     pass
 
-    # Send a local file at 'src' to the servers, placing it in the remote
-    # working directory as the file 'dst'.
-    # If the file already exists on a server, that server will be skipped.
-    def distribute_file(self, src, dst):
-        logging.info("Distributing file {}".format(src));
-        remote_file = self.remote_file(dst)
+    # Send a local file at 'src' to the servers, putting it in the remote
+    # working directory. If the file already exists on a server, that server
+    # will be skipped.
+    def distribute_file(self, src):
+        logging.info("Distributing file {}".format(src))
+        remote_file = self.remote_file(os.path.basename(src))
         for addr in self.addresses:
             sftp_client = self.clients[addr].open_sftp()
             try:
@@ -116,17 +123,21 @@ class Servers(object):
             except IOError:
                 sftp_client.put(src, remote_file)
             sftp_client.close()
+        return remote_file
 
-    # Returns the name of a remote filename.
+    # Returns the name of a file in the remote working directory.
     def remote_file(self, filename):
         return os.path.join(self.remote_working_dir, filename)
+
+    # Retrieves the contents of the metrics directory specific to this run.
+    def collect_metrics(self, local_dir):
+        return
 
     # Cleanup each cluster and close the clients for each one.
     def cleanup(self):
         for addr in self.addresses:
             client = self.clients[addr]
-            stdin, stdout, stderr = client.exec_command("pkill kudu-master")
-            stdin, stdout, stderr = client.exec_command("pkill kudu-tserver")
+            stdin, stdout, stderr = client.exec_command("pkill {}".format(self.bin_type))
             stdin, stdout, stderr = client.exec_command("rm -rf {}".format(" ".join(self.dirs)))
             client.close()
 
@@ -135,113 +146,40 @@ class Servers(object):
         return
 
 
+# Encapsulates the masters and tablet servers.
 class Cluster:
-    def __init__(self, base_opts, config, secrets):
+    def __init__(self, config, secrets):
         self.config = config
-        self.masters = Servers(self.config['masters'], secrets)
-        self.tservers = Servers(self.config['tservers'], secrets)
-        self.master_flags = ",".join(self.masters.addresses)
+        self.masters = Servers("kudu-master", self.config['masters'], secrets)
+        self.tservers = Servers("kudu-tserver", self.config['tservers'], secrets)
 
-    # Sets up the masters and tablet servers, and distributes the binaries
+    # Sets up the masters and tablet servers, distributing the binaries
     # necessary to start the cluster.
-    def setup_servers():
+    def setup_servers(self):
         self.masters.setup()
         self.tservers.setup()
-        self.masters.distribute_file(
-            os.path.join(base_opts['kudu_sbin_dir'], "kudu-master"), "kudu-master")
-        self.tservers.distribute_file(
-            os.path.join(base_opts['kudu_sbin_dir'], "kudu-tserver"), "kudu-tserver")
 
     # Starts the servers and waits for them to come online.
-    def start_servers():
-        self.masters.start("kudu-master", "", "8051")
-        self.tservers.start("kudu-tserver", "", "8050")
+    def start_servers(self):
+        logging.info("starting masters")
+        self.masters.start(master_flags, "8051")
+
+        logging.info("starting tservers")
+        self.tservers.start(tserver_flags, "8050")
 
     # Kills the Kudu processes on the remote hosts.
-    def kill_servers():
+    def kill_servers(self):
         logging.info("cleaning up")
         self.masters.cleanup()
         self.tservers.cleanup()
 
-
-def start_servers(config):
-    logging.info("Starting servers...")
-
-    ts_bin = os.path.join(exp.config['kudu_sbin_dir'], "kudu-tserver")
-    master_bin = os.path.join(exp.config['kudu_sbin_dir'], "kudu-master")
-    if not os.path.exists(exp.log_dir):
-        os.makedirs(exp.log_dir)
-    try:
-        ts_proc = subprocess.Popen(
-            [ts_bin] + exp.flags("ts_flags") + ["--log_dir", exp.log_dir],
-            stderr=subprocess.STDOUT,
-            stdout=file(os.path.join(exp.log_dir, "ts.stderr"), "w"))
-        master_proc = subprocess.Popen(
-            [master_bin] + exp.flags("master_flags") + [ "--log_dir", exp.log_dir],
-            stderr=subprocess.STDOUT,
-            stdout=file(os.path.join(exp.log_dir, "master.stderr"), "w"))
-    except OSError, e:
-        logging.fatal("Failed to start kudu servers: %s", e)
-        if '/' not in ts_bin:
-            logging.fatal("Make sure they are on your $PATH, or configure kudu_sbin_dir")
-        else:
-            logging.fatal("Tried path: %s", ts_bin)
-            sys.exit(1)
-    # Wait for servers to start.
-    for x in xrange(60):
-        try:
-            logging.info("Waiting for servers to come up...")
-            urllib2.urlopen("http://localhost:8050/").read()
-            urllib2.urlopen("http://localhost:8051/").read()
-            break
-        except:
-            if x == 59:
-                raise
-            time.sleep(1)
-            pass
-    return (master_proc, ts_proc)
-
-
-def dump_ts_info(exp, suffix):
-    for page, fname in [("rpcz", "rpcz"),
-                ("metrics?include_raw_histograms=1", "metrics"),
-                ("mem-trackers?raw", "mem-trackers")]:
-        fname = "%s-%s.txt" % (fname, suffix)
-        dst = file("")
-        try:
-            shutil.copyfileobj(urllib2.urlopen("http://localhost:8050/" + page), dst)
-        except:
-            logging.fatal("Failed to fetch tablet server info. TS may have crashed.")
-            logging.fatal("Check for FATAL log files in %s", exp.log_dir)
-            sys.exit(1)
-
-def run_experiment(exp):
-    logging.info("Running experiment %s" % exp.dimensions)
-    stop_servers()
-    remove_data()
-    # Sync file system so that there isn't any dirty data left over from prior runs
-    # sitting in buffer caches.
-    subprocess.check_call(["sync"])
-    start_servers(exp)
-    for yaml_entry in exp.config['ycsb_workloads']:
-        phase, workload = yaml_entry['phase'], yaml_entry['workload']
-        run_ycsb(exp, phase, workload)
-        dump_ts_info(exp, "after-%s-%s" % (phase, workload))
-    stop_servers()
-    remove_data()
-
 def load_clusters(setup_yaml, secrets_yaml):
-    base_opts = setup_yaml['base_opts']
     clusters = {}
     for name, config in setup_yaml['clusters'].iteritems():
         logging.info("Connecting to cluster: {}".format(name))
-        clusters[name] = Cluster(base_opts, config, secrets_yaml)
-    return clusters, base_opts
-
-def run_all(clusters, opts):
-    opts['workloads']
-    for c in clusters:
-        run_experiment(c)
+        clusters[name] = Cluster(config, secrets_yaml)
+        clusters[name].setup_servers()
+    return clusters
 
 def main():
     p = argparse.ArgumentParser("Run a set of experiments")
@@ -258,7 +196,14 @@ def main():
     args = p.parse_args()
     setup_yaml = yaml.load(file(args.setup_yaml_path))
     secrets_yaml = yaml.load(file(args.secrets_yaml_path))
-    clusters, opts = load_clusters(setup_yaml, secrets_yaml)
+    global BASE_OPTS
+    BASE_OPTS = setup_yaml['base_opts']
+    clusters = load_clusters(setup_yaml, secrets_yaml)
+
+    # Add the local binary directory to the local path.
+    kudu_sbin_dir = BASE_OPTS['kudu_sbin_dir']
+    if len(kudu_sbin_dir) == 0:
+        sys.path.append(kudu_sbin_dir)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
