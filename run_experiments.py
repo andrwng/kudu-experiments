@@ -31,9 +31,10 @@ import yaml
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
-class Server(object):
-    def __init__(self, config, secrets):
-        self.config = config
+
+class Servers(object):
+    def __init__(self, server_config, secrets):
+        self.config = server_config
         self.secrets = secrets
         self.addresses = self.config['addresses']
         self.setup_script = None
@@ -41,13 +42,18 @@ class Server(object):
             self.setup_script = os.path.abspath(self.config['setup_script'])
         self.flags = []
         self.dirs = []
+        self.remote_working_dir = self.config['working_dir']
+        self.dirs.append(self.remote_working_dir)
         for name, path in self.config['dir_flags'].iteritems():
             self.flags.append("--{}={}".format(name, path))
             self.dirs.extend(path.split(','))
         logging.info("flags: {}, dirs: {}".format(self.flags, self.dirs))
         logging.info("addrs: {}".format(self.addresses))
 
-    # Create the directories and run any setup.
+    # Create clients to connect with each server.
+    #
+    # Create necessary directories on each server and send over any scripts
+    # that may need running.
     def setup(self):
         self.clients = {}
         for addr in self.addresses:
@@ -57,40 +63,106 @@ class Server(object):
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             if addr in self.secrets.keys():
-                s = self.secrets[addr]
+                secret = self.secrets[addr]
                 logging.info("Reading secrets for {}".format(addr))
-                key = paramiko.RSAKey.from_private_key_file(s['private_key_file'], password=s['password'])
-                client.connect(hostname=addr, username=s['user'], pkey=key)
+                key = paramiko.RSAKey.from_private_key_file( \
+                    secret['private_key_file'], password=secret['password'])
+                client.connect(hostname=addr, username=secret['user'], pkey=key)
             else:
                 logging.info("No secrets listed for server")
                 client.connect(hostname=addr)
             logging.info("Connected to server {}".format(addr))
+
+            # Create any directories we might need.
             stdin, stdout, stderr = client.exec_command("mkdir -p {}".format(" ".join(self.dirs)))
             self.clients[addr] = client
 
-        # Check if there exists the binary already.
-        # TODO: send over the setup script and run setup.
+        # Send over the setup script and run setup.
+        if self.setup_script:
+            self.distribute_file(self.setup_script, self.remote_working_dir)
 
+    # Runs the given binary file, located in the remote working directories,
+    # across all servers.
+    def start(self, bin_file, flags, port):
+        for addr in self.addresses:
+            logging.info("Starting daemon on server {}".format(addr))
+            client = self.clients[addr]
+            stdin, stdout, stderr = client.exec_command(
+                "{} {}".format(self.remote_file(bin_file)), flags)
+
+            # Wait for the server to come online.
+            for x in xrange(60):
+                try:
+                    logging.info("Waiting for server {} to come up".format(addr))
+                    urllib2.urlopen("http://{}:{}/".format(addr, port))
+                    break
+                except:
+                    if x == 59:
+                        raise
+                    time.sleep(1)
+                    pass
+
+    # Send a local file at 'src' to the servers, placing it in the remote
+    # working directory as the file 'dst'.
+    # If the file already exists on a server, that server will be skipped.
+    def distribute_file(self, src, dst):
+        logging.info("Distributing file {}".format(src));
+        remote_file = self.remote_file(dst)
+        for addr in self.addresses:
+            sftp_client = self.clients[addr].open_sftp()
+            try:
+                sftp_client.stat(remote_file)
+                logging.info("File already exists on {}".format(addr))
+            except IOError:
+                sftp_client.put(src, remote_file)
+            sftp_client.close()
+
+    # Returns the name of a remote filename.
+    def remote_file(self, filename):
+        return os.path.join(self.remote_working_dir, filename)
+
+    # Cleanup each cluster and close the clients for each one.
     def cleanup(self):
         for addr in self.addresses:
             client = self.clients[addr]
+            stdin, stdout, stderr = client.exec_command("pkill kudu-master")
+            stdin, stdout, stderr = client.exec_command("pkill kudu-tserver")
             stdin, stdout, stderr = client.exec_command("rm -rf {}".format(" ".join(self.dirs)))
-            for line in stdout:
-                logging.info(line)
+            client.close()
+
+    # Returns the requested metrics for the servers.
+    def collect_metrics(self, metrics):
+        return
+
 
 class Cluster:
     def __init__(self, base_opts, config, secrets):
         self.config = config
-        self.masters = Server(self.config['masters'], secrets)
+        self.masters = Servers(self.config['masters'], secrets)
+        self.tservers = Servers(self.config['tservers'], secrets)
+        self.master_flags = ",".join(self.masters.addresses)
+
+    # Sets up the masters and tablet servers, and distributes the binaries
+    # necessary to start the cluster.
+    def setup_servers():
         self.masters.setup()
-        self.tservers = Server(self.config['tservers'], secrets)
         self.tservers.setup()
+        self.masters.distribute_file(
+            os.path.join(base_opts['kudu_sbin_dir'], "kudu-master"), "kudu-master")
+        self.tservers.distribute_file(
+            os.path.join(base_opts['kudu_sbin_dir'], "kudu-tserver"), "kudu-tserver")
+
+    # Starts the servers and waits for them to come online.
+    def start_servers():
+        self.masters.start("kudu-master", "", "8051")
+        self.tservers.start("kudu-tserver", "", "8050")
+
+    # Kills the Kudu processes on the remote hosts.
+    def kill_servers():
         logging.info("cleaning up")
         self.masters.cleanup()
         self.tservers.cleanup()
 
-    def start_servers():
-        return
 
 def start_servers(config):
     logging.info("Starting servers...")
@@ -129,21 +201,6 @@ def start_servers(config):
             pass
     return (master_proc, ts_proc)
 
-def stop_servers():
-    subprocess.call(["pkill", "kudu-tserver"])
-    subprocess.call(["pkill", "kudu-master"])
-
-
-def remove_data():
-    for d in DATA_DIRS:
-        rmr(d)
-        os.makedirs(d)
-
-def rmr(dir):
-    if os.path.exists(dir):
-        logging.info("Removing data from %s" % dir)
-        shutil.rmtree(dir)
-
 
 def dump_ts_info(exp, suffix):
     for page, fname in [("rpcz", "rpcz"),
@@ -173,18 +230,6 @@ def run_experiment(exp):
     stop_servers()
     remove_data()
 
-def generate_dimension_combinations(setup_yaml):
-    combos = [{}]
-    for dim_name, dim_values in setup_yaml['dimensions'].iteritems():
-        new_combos = []
-        for c in combos:
-            for dim_val in dim_values:
-                new_combo = c.copy()
-                new_combo[dim_name] = dim_val
-                new_combos.append(new_combo)
-        combos = new_combos
-    return combos
-
 def load_clusters(setup_yaml, secrets_yaml):
     base_opts = setup_yaml['base_opts']
     clusters = {}
@@ -193,11 +238,10 @@ def load_clusters(setup_yaml, secrets_yaml):
         clusters[name] = Cluster(base_opts, config, secrets_yaml)
     return clusters, base_opts
 
-
 def run_all(clusters, opts):
+    opts['workloads']
     for c in clusters:
         run_experiment(c)
-
 
 def main():
     p = argparse.ArgumentParser("Run a set of experiments")
@@ -215,7 +259,6 @@ def main():
     setup_yaml = yaml.load(file(args.setup_yaml_path))
     secrets_yaml = yaml.load(file(args.secrets_yaml_path))
     clusters, opts = load_clusters(setup_yaml, secrets_yaml)
-    # run_all(clusters, opts)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

@@ -2,14 +2,21 @@
 base_opts:
   # Local path to find kudu-tserver, kudu-master.
   # If empty, these binaries should be on your $PATH
-  kudu_sbin_dir: ""
+  kudu_sbin_dir: "/data/8/awong/Repositories/kudu/build/latest/bin"
+
+  # The interval at which metrics are polled from Kudu.
+  metrics_interval_secs: "1"
 
   # Path to scripts to run as the workload.
   # Each workload will be run.
   workloads:
     inserts:
-      script: ""
-      metrics: ""
+      max_execution_time: "60"
+      script: "inserts.sh"
+      metrics:
+        - "inserted"
+        - "rows"
+        - "bytes"
 
 clusters:
   va1022-only:
@@ -21,8 +28,10 @@ clusters:
       # Local path to any setup script.
       setup_script: ""
 
-      # Directory in which to put binaries.
-      sbin_dir: "/data/8/awong/exp"
+      # Directory in which to put binaries, scripts, etc.
+      working_dir: "/data/8/awong/exp"
+
+      # Directory flags needed for Kudu to run.
       dir_flags:
         fs_wal_dir: "/data/1/awong/exp"
         fs_metadata_dir: "/data/1/awong/exp"
@@ -32,7 +41,7 @@ clusters:
       addresses:
         - "va1022.halxg.cloudera.com"
       setup_script: ""
-      sbin_dir: "/data/8/awong/exp"
+      working_dir: "/data/8/awong/exp"
       dir_flags:
         fs_wal_dir: "/data/3/awong/exp"
         fs_metadata_dir: "/data/3/awong/exp"
