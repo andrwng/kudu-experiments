@@ -28,7 +28,7 @@ clusters:
       # Local path to any setup script.
       setup_script: ""
 
-      # Directory in which to put binaries, scripts, etc.
+      # Remote directory in which to put binaries, scripts, logs, etc.
       working_dir: "/data/8/awong/exp"
 
       # Directory flags needed for Kudu to run.

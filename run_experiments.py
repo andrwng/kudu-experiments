@@ -33,6 +33,17 @@ import yaml
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 BASE_OPTS = None
 
+# Runs a command remotely, logging errors and exiting on failure.
+def exec_or_log_error(client, cmd):
+    try:
+        stdin, stdout, stderr = client.exec_command(cmd)
+    except IOError as e:
+        logging.error("Error executing: {}".format(cmd))
+        for line in stdout:
+            logging.error(line)
+        sys.exit(1)
+
+# Manages a set of identical Kudu daemons.
 class Servers(object):
     def __init__(self, bin_type, server_config, secrets):
         self.bin_type = bin_type
@@ -43,14 +54,16 @@ class Servers(object):
         self.remote_binary = None
         if len(self.config['setup_script']) > 0:
             self.setup_script = os.path.abspath(self.config['setup_script'])
-        self.flags = []
-        self.dirs = []
         self.remote_working_dir = self.config['working_dir']
-        self.dirs.append(self.remote_working_dir)
+
+        # Set the log and fs directory flags.
+        self.log_dir = os.path.join(self.remote_working_dir, "logs")
+        self.dir_flags = ["--log_dir={}".format(self.log_dir)]
+        self.dirs = [self.log_dir]
         for name, path in self.config['dir_flags'].iteritems():
-            self.flags.append("--{}={}".format(name, path))
+            self.dir_flags.append("--{}={}".format(name, path))
             self.dirs.extend(path.split(','))
-        logging.info("flags: {}, dirs: {}".format(self.flags, self.dirs))
+        logging.info("dir_flags: {}, dirs: {}".format(self.dir_flags, self.dirs))
         logging.info("addrs: {}".format(self.addresses))
 
     # Create clients to connect with each server.
@@ -63,7 +76,7 @@ class Servers(object):
         for addr in self.addresses:
             logging.info("Connecting to server {}".format(addr))
 
-            # Create client.
+            # Create a client for this address.
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             if addr in self.secrets.keys():
@@ -72,7 +85,8 @@ class Servers(object):
                 key = paramiko.RSAKey.from_private_key_file( \
                     secret['private_key_file'], password=secret['pkey_password'])
                 logging.info("Logging in with user {}".format(secret['user']))
-                client.connect(hostname=addr, username=secret['user'], password=secret['password'], pkey=key)
+                client.connect(
+                    hostname=addr, username=secret['user'], password=secret['password'], pkey=key)
             else:
                 logging.info("No secrets listed for server")
                 client.connect(hostname=addr)
@@ -80,24 +94,28 @@ class Servers(object):
             self.clients[addr] = client
 
             # Create any directories we might need.
-            stdin, stdout, stderr = client.exec_command("mkdir -p {}".format(" ".join(self.dirs)))
+            exec_or_log_error(client, "mkdir -p {}".format(" ".join(self.dirs)))
 
         # Send over the setup script and run setup.
         if self.setup_script:
-            self.distribute_file(self.setup_script)
+            remote_script = os.path.join(BASE_OPTS['kudu_sbin_dir'], self.setup_script)
+            self.distribute_file(remote_script)
+            exec_or_log_error(remote_script)
 
         # Distribute the binary file.
-        self.remote_binary = self.distribute_file(
-            os.path.join(BASE_OPTS['kudu_sbin_dir'], self.bin_type))
+        self.distribute_file(os.path.join(BASE_OPTS['kudu_sbin_dir'], self.bin_type))
 
 
     # Runs the binary files across all servers.
     def start(self, flags, port):
+        remote_binary = os.path.join(self.remote_working_dir, self.bin_type)
+        flags_str = " ".join(self.dir_flags + flags)
         for addr in self.addresses:
             logging.info("Starting daemon on server {}".format(addr))
+            cmd = "{} {}".format(remote_binary, flags_str)
+            logging.info(cmd)
             client = self.clients[addr]
-            stdin, stdout, stderr = client.exec_command(
-                "{} {}".format(self.remote_binary), flags)
+            stdin, stdout, stderr = client.exec_command(cmd)
 
             # Wait for the server to come online.
             for x in xrange(60):
@@ -107,7 +125,9 @@ class Servers(object):
                     break
                 except:
                     if x == 59:
-                        raise
+                        logging.error("Couldn't ping server...")
+                        for line in stdout.readlines():
+                            logging.error(line)
                     time.sleep(1)
                     pass
 
@@ -125,13 +145,12 @@ class Servers(object):
             except IOError:
                 sftp_client.put(src, remote_file)
             sftp_client.close()
-        return remote_file
 
-    # Returns the name of a file in the remote working directory.
+    # Return the name of a file in the remote working directory.
     def remote_file(self, filename):
         return os.path.join(self.remote_working_dir, filename)
 
-    # Retrieves the contents of the metrics directory specific to this run.
+    # Retrieve the contents of the metrics directory specific to this run.
     def collect_metrics(self, local_dir):
         return
 
@@ -143,38 +162,54 @@ class Servers(object):
             stdin, stdout, stderr = client.exec_command("rm -rf {}".format(" ".join(self.dirs)))
             client.close()
 
-    # Returns the requested metrics for the servers.
-    def collect_metrics(self, metrics):
-        return
-
 
 # Encapsulates the masters and tablet servers.
+# Expected usage is to:
+# 1. setup the servers
+# 2. start the servers
+# 3. run workloads against the servers
+# 4. collect the metrics for the servers
+# 5. destroy the servers
 class Cluster:
     def __init__(self, config, secrets):
         self.config = config
         self.masters = Servers("kudu-master", self.config['masters'], secrets)
         self.tservers = Servers("kudu-tserver", self.config['tservers'], secrets)
 
-    # Sets up the masters and tablet servers, distributing the binaries
+    # Set up the masters and tablet servers, distributing the binaries
     # necessary to start the cluster.
     def setup_servers(self):
         self.masters.setup()
         self.tservers.setup()
 
-    # Starts the servers and waits for them to come online.
+    # Start the servers and wait for them to come online.
     def start_servers(self):
-        logging.info("starting masters")
+        logging.info("Starting masters")
+        master_flags = []
+        if len(self.masters.addresses) > 1:
+            master_flags.append("--master_addresses={}".format(
+                ",".join(["{}:7051".format(a) for a in self.masters.addresses])))
         self.masters.start(master_flags, "8051")
 
-        logging.info("starting tservers")
+        logging.info("Starting tservers")
+        tserver_flags = []
+        tserver_flags.append("--tserver_master_addrs={}".format(
+            ",".join(["{}:7051".format(a) for a in self.masters.addresses])))
         self.tservers.start(tserver_flags, "8050")
 
-    # Kills the Kudu processes on the remote hosts.
+    # Run a workload against the cluster.
+    def run_workload(self):
+        return
+
+    # Kill the Kudu processes on the remote hosts.
     def kill_servers(self):
         logging.info("cleaning up")
         self.masters.cleanup()
         self.tservers.cleanup()
 
+
+# Create and connect to the various servers of the cluster, running any
+# necessary pre-requisite scripts to running workloads.
 def load_clusters(setup_yaml, secrets_yaml, cluster_filter):
     clusters = {}
     cluster_re = re.compile(cluster_filter)
@@ -187,6 +222,8 @@ def load_clusters(setup_yaml, secrets_yaml, cluster_filter):
         clusters[name].setup_servers()
     return clusters
 
+
+# Load the clusters and start them.
 def main():
     p = argparse.ArgumentParser("Run a set of experiments")
     p.add_argument("--setup-yaml",
@@ -208,12 +245,11 @@ def main():
     secrets_yaml = yaml.load(file(args.secrets_yaml_path))
     global BASE_OPTS
     BASE_OPTS = setup_yaml['base_opts']
-    clusters = load_clusters(setup_yaml, secrets_yaml, args.cluster_filter)
 
-    # Add the local binary directory to the local path.
-    kudu_sbin_dir = BASE_OPTS['kudu_sbin_dir']
-    if len(kudu_sbin_dir) == 0:
-        sys.path.append(kudu_sbin_dir)
+    clusters = load_clusters(setup_yaml, secrets_yaml, args.cluster_filter)
+    for cname, cluster in clusters.iteritems():
+        logging.info("Starting servers for cluster {}".format(cname))
+        cluster.start_servers()
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
