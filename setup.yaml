@@ -46,4 +46,23 @@ clusters:
         fs_wal_dir: "/data/3/awong/exp"
         fs_metadata_dir: "/data/3/awong/exp"
         fs_data_dirs: "/data/4/awong/exp"
+  vpc:
+    masters:
+      addresses:
+        - "awong-cen73.vpc.cloudera.com"
+      setup_script: ""
+      working_dir: "/data/working_dir"
+      dir_flags:
+        fs_wal_dir: "/data/master-wal"
+        fs_metadata_dir: "/data/master-meta"
+        fs_data_dirs: "/data/master-data"
 
+    tservers:
+      addresses:
+        - "awong-cen73.vpc.cloudera.com"
+      setup_script: ""
+      working_dir: "/data/working_dir"
+      dir_flags:
+        fs_wal_dir: "/data/tserver-wal"
+        fs_metadata_dir: "/data/tserver-meta"
+        fs_data_dirs: "/data/tserver-data"

@@ -22,6 +22,7 @@ import copy
 import logging
 import os
 import paramiko
+import re
 import shutil
 import subprocess
 import sys
@@ -69,8 +70,9 @@ class Servers(object):
                 secret = self.secrets[addr]
                 logging.info("Reading secrets for {}".format(addr))
                 key = paramiko.RSAKey.from_private_key_file( \
-                    secret['private_key_file'], password=secret['password'])
-                client.connect(hostname=addr, username=secret['user'], pkey=key)
+                    secret['private_key_file'], password=secret['pkey_password'])
+                logging.info("Logging in with user {}".format(secret['user']))
+                client.connect(hostname=addr, username=secret['user'], password=secret['password'], pkey=key)
             else:
                 logging.info("No secrets listed for server")
                 client.connect(hostname=addr)
@@ -173,9 +175,13 @@ class Cluster:
         self.masters.cleanup()
         self.tservers.cleanup()
 
-def load_clusters(setup_yaml, secrets_yaml):
+def load_clusters(setup_yaml, secrets_yaml, cluster_filter):
     clusters = {}
+    cluster_re = re.compile(cluster_filter)
     for name, config in setup_yaml['clusters'].iteritems():
+        if len(cluster_re.findall(name)) == 0:
+            logging.info("Skipping cluster: {}".format(name))
+            continue
         logging.info("Connecting to cluster: {}".format(name))
         clusters[name] = Cluster(config, secrets_yaml)
         clusters[name].setup_servers()
@@ -193,12 +199,16 @@ def main():
         type=str,
         help="YAML file containing user info",
         default=os.path.join(BASE_DIR, "secrets.yaml"))
+    p.add_argument("--cluster-filter",
+        dest="cluster_filter",
+        type=str, default=".*",
+        help="Regex pattern used to filter which clusters to run against")
     args = p.parse_args()
     setup_yaml = yaml.load(file(args.setup_yaml_path))
     secrets_yaml = yaml.load(file(args.secrets_yaml_path))
     global BASE_OPTS
     BASE_OPTS = setup_yaml['base_opts']
-    clusters = load_clusters(setup_yaml, secrets_yaml)
+    clusters = load_clusters(setup_yaml, secrets_yaml, args.cluster_filter)
 
     # Add the local binary directory to the local path.
     kudu_sbin_dir = BASE_OPTS['kudu_sbin_dir']
