@@ -17,6 +17,8 @@
 # specific language governing permissions and limitations
 # under the License.
 """
+This file is taken and modified from toddlipcon/kudu-ycsb-experiments.
+
 This file contains various utility functions that are useful
 from within IPython notebooks trying to analyze YCSB results.
 
@@ -31,7 +33,6 @@ import numpy
 import json
 import time
 from kudu_metrics_log import MetricsLogParser
-from ycsb_log import YcsbLogParser
 
 def parse_ycsb_start_ts(path):
     for line in file(path):
