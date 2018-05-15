@@ -19,6 +19,7 @@
 
 import argparse
 import copy
+import datetime
 import logging
 import os
 import paramiko
@@ -31,6 +32,8 @@ import urllib2
 import yaml
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+WORKLOADS_DIR = os.path.join(BASE_DIR, "workloads")
+LOCAL_LOGS_DIR = os.path.join(BASE_DIR, "logs")
 BASE_OPTS = None
 
 # Runs a command remotely, logging errors and exiting on failure.
@@ -57,9 +60,9 @@ class Servers(object):
         self.remote_working_dir = self.config['working_dir']
 
         # Set the log and fs directory flags.
-        self.log_dir = os.path.join(self.remote_working_dir, "logs")
-        self.dir_flags = ["--log_dir={}".format(self.log_dir)]
-        self.dirs = [self.log_dir]
+        self.remote_log_dir = os.path.join(self.remote_working_dir, "logs")
+        self.dir_flags = ["--log_dir={}".format(self.remote_log_dir)]
+        self.dirs = [self.remote_log_dir]
         for name, path in self.config['dir_flags'].iteritems():
             self.dir_flags.append("--{}={}".format(name, path))
             self.dirs.extend(path.split(','))
@@ -76,7 +79,7 @@ class Servers(object):
         for addr in self.addresses:
             logging.info("Connecting to server {}".format(addr))
 
-            # Create a client for this address.
+            # Create an SSH client for this address.
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             if addr in self.secrets.keys():
@@ -93,7 +96,8 @@ class Servers(object):
             logging.info("Connected to server {}".format(addr))
             self.clients[addr] = client
 
-            # Create any directories we might need.
+            # Destroy and recreate any directories we might need.
+            exec_or_log_error(client, "rm -rf {}".format(" ".join(self.dirs)))
             exec_or_log_error(client, "mkdir -p {}".format(" ".join(self.dirs)))
 
         # Send over the setup script and run setup.
@@ -150,10 +154,25 @@ class Servers(object):
     def remote_file(self, filename):
         return os.path.join(self.remote_working_dir, filename)
 
-    # TODO: Retrieve the contents of the metrics directory, limited to the most
-    # recent workload.
+    # Retrieve the contents of each server's metrics directory, limited to the
+    # most recent workload, and place them in 'local_dir'.
     def collect_metrics(self, local_dir):
-        return
+        metrics_dir = os.path.abspath(local_dir)
+        metrics_regex = re.compile("{}.*diagnostics.*".format(self.bin_type))
+        for addr in self.addresses:
+            # Make the local directory for this server.
+            local_metrics_dir = os.path.join(metrics_dir, addr)
+            subprocess.check_output(["mkdir", "-p", local_metrics_dir])
+
+            # Now fetch the remote diagnostics files, only picking out the ones
+            # that belong to this server.
+            sftp_client = self.clients[addr].open_sftp()
+            for filename in sftp_client.listdir(self.remote_log_dir):
+                if len(metrics_regex.findall(filename)) > 0:
+                    logging.info("Getting remote file: {}".format(filename))
+                    remote_metrics_log = os.path.join(self.remote_log_dir, filename)
+                    local_metrics_log = os.path.join(local_metrics_dir, filename)
+                    sftp_client.get(remote_metrics_log, local_metrics_log)
 
     # Stop each node.
     def stop(self):
@@ -185,6 +204,9 @@ class Cluster:
         self.tservers = Servers("kudu-tserver", self.config['tservers'], secrets)
         self.masters = Servers("kudu-master", self.config['masters'], secrets)
         self.master_addrs = ",".join(["{}:7051".format(a) for a in self.masters.addresses])
+        self.cluster_env = os.environ.copy()
+        self.cluster_env["KUDU_MASTERS"] = self.master_addrs
+        self.cluster_env["PATH"] += os.pathsep + BASE_OPTS["kudu_sbin_dir"]
 
     # Set up the masters and tablet servers, distributing the binaries
     # necessary to start the cluster.
@@ -205,10 +227,24 @@ class Cluster:
         tserver_flags.append("--tserver_master_addrs={}".format(self.master_addrs))
         self.tservers.start(tserver_flags, "8050")
 
-    # TODO: Run a workload against the cluster.
-    def run_workload(self):
-        time.sleep(10)
-        return
+    # Collect the metrics cluster-wide and place them in the local directory
+    # 'dir_name'. 'dir_name' must already exist.
+    def collect_metrics(self, dir_name):
+        metrics_dir = os.path.abspath(dir_name)
+        masters_log_dir = os.path.join(metrics_dir, "masters")
+        subprocess.check_output(["mkdir", "-p", masters_log_dir])
+        self.masters.collect_metrics(masters_log_dir)
+
+        tservers_log_dir = os.path.join(metrics_dir, "tservers")
+        subprocess.check_output(["mkdir", "-p", tservers_log_dir])
+        self.tservers.collect_metrics(tservers_log_dir)
+
+    # Run a command, with cluster-specific environment variables set.
+    def run_workload(self, cmd):
+        out = subprocess.check_output(cmd, env=self.cluster_env)
+        logging.info("Running command: {}".format(cmd))
+        logging.info(out)
+        time.sleep(1)
 
     # Stop the Kudu processes on the remote hosts.
     def stop_servers(self):
@@ -256,11 +292,21 @@ def main():
     BASE_OPTS = setup_yaml['base_opts']
 
     clusters = load_clusters(setup_yaml, secrets_yaml, args.cluster_filter)
+    time_suffix = datetime.datetime.now().strftime("-%Y-%m-%d_%H%M")
     for cname, cluster in clusters.iteritems():
         logging.info("Starting servers for cluster {}".format(cname))
-        cluster.start_servers()
-        cluster.run_workload()
-        cluster.stop_servers()
+        for wname, workload in BASE_OPTS["workloads"].iteritems():
+            logging.info("Running workload {}".format(wname))
+            workload_script = os.path.join(WORKLOADS_DIR, workload["script"])
+            cluster.start_servers()
+            cluster.run_workload(workload_script)
+            cluster.stop_servers()
+
+            # Create the appropriate directories for metrics.
+            metrics_dir = os.path.join(LOCAL_LOGS_DIR, wname + time_suffix, cname)
+            subprocess.check_output(["mkdir", "-p", metrics_dir])
+            cluster.collect_metrics(metrics_dir)
+            cluster.stop_servers()
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

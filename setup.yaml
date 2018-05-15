@@ -4,6 +4,9 @@ base_opts:
   # your $PATH. If empty, these binaries should already be on your $PATH.
   kudu_sbin_dir: "/data/8/awong/Repositories/kudu/build/latest/bin"
 
+  # Local path under which to place metrics.
+  kudu_logs_dir: "/data/8/awong/kudu-experiments/logs"
+
   # The interval at which metrics are polled from Kudu.
   metrics_interval_secs: "1"
 
@@ -12,11 +15,7 @@ base_opts:
   workloads:
     inserts:
       max_execution_time: "60"
-      script: "inserts.sh"
-      metrics:
-        - "inserted"
-        - "rows"
-        - "bytes"
+      script: "sequential_insert.sh"
 
 clusters:
   va1022-only:
