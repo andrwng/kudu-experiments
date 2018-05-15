@@ -150,18 +150,27 @@ class Servers(object):
     def remote_file(self, filename):
         return os.path.join(self.remote_working_dir, filename)
 
-    # Retrieve the contents of the metrics directory specific to this run.
+    # TODO: Retrieve the contents of the metrics directory, limited to the most
+    # recent workload.
     def collect_metrics(self, local_dir):
         return
 
-    # Cleanup each cluster and close the clients for each one.
+    # Stop each node.
+    def stop(self):
+        for addr in self.addresses:
+            client = self.clients[addr]
+            exec_or_log_error(client, "pkill {}".format(self.bin_type))
+
+    # Delete the server's contents.
     def cleanup(self):
         for addr in self.addresses:
             client = self.clients[addr]
-            stdin, stdout, stderr = client.exec_command("pkill {}".format(self.bin_type))
-            stdin, stdout, stderr = client.exec_command("rm -rf {}".format(" ".join(self.dirs)))
-            client.close()
+            exec_or_log_error(client, "rm -rf {}".format(" ".join(self.dirs)))
 
+    # Close any existing connections to servers.
+    def close(self):
+        for client in self.clients:
+            client.close()
 
 # Encapsulates the masters and tablet servers.
 # Expected usage is to:
@@ -173,8 +182,9 @@ class Servers(object):
 class Cluster:
     def __init__(self, config, secrets):
         self.config = config
-        self.masters = Servers("kudu-master", self.config['masters'], secrets)
         self.tservers = Servers("kudu-tserver", self.config['tservers'], secrets)
+        self.masters = Servers("kudu-master", self.config['masters'], secrets)
+        self.master_addrs = ",".join(["{}:7051".format(a) for a in self.masters.addresses])
 
     # Set up the masters and tablet servers, distributing the binaries
     # necessary to start the cluster.
@@ -187,25 +197,24 @@ class Cluster:
         logging.info("Starting masters")
         master_flags = []
         if len(self.masters.addresses) > 1:
-            master_flags.append("--master_addresses={}".format(
-                ",".join(["{}:7051".format(a) for a in self.masters.addresses])))
+            master_flags.append("--master_addresses={}".format(self.master_addrs))
         self.masters.start(master_flags, "8051")
 
         logging.info("Starting tservers")
-        tserver_flags = []
-        tserver_flags.append("--tserver_master_addrs={}".format(
-            ",".join(["{}:7051".format(a) for a in self.masters.addresses])))
+        tserver_flags = ["--metrics_log_interval_ms=1000"]
+        tserver_flags.append("--tserver_master_addrs={}".format(self.master_addrs))
         self.tservers.start(tserver_flags, "8050")
 
-    # Run a workload against the cluster.
+    # TODO: Run a workload against the cluster.
     def run_workload(self):
+        time.sleep(10)
         return
 
-    # Kill the Kudu processes on the remote hosts.
-    def kill_servers(self):
-        logging.info("cleaning up")
-        self.masters.cleanup()
-        self.tservers.cleanup()
+    # Stop the Kudu processes on the remote hosts.
+    def stop_servers(self):
+        logging.info("Stopping servers")
+        self.masters.stop()
+        self.tservers.stop()
 
 
 # Create and connect to the various servers of the cluster, running any
@@ -250,6 +259,8 @@ def main():
     for cname, cluster in clusters.iteritems():
         logging.info("Starting servers for cluster {}".format(cname))
         cluster.start_servers()
+        cluster.run_workload()
+        cluster.stop_servers()
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
