@@ -65,3 +65,27 @@ clusters:
         fs_wal_dir: "/data/tserver-wal"
         fs_metadata_dir: "/data/tserver-meta"
         fs_data_dirs: "/data/tserver-data"
+  ec2:
+    masters:
+      addresses:
+        - "ec2-54-245-147-139.us-west-2.compute.amazonaws.com"
+      setup_script: ""
+      working_dir: "/data/working_dir"
+      dir_flags:
+        fs_wal_dir: "/data/master-wal"
+        fs_metadata_dir: "/data/master-meta"
+        fs_data_dirs: "/data/master-data"
+
+    tservers:
+      addresses:
+        - "ec2-54-245-147-139.us-west-2.compute.amazonaws.com"
+      # TODO:
+      # - install pip
+      # - install aws cli
+      # - open up ports
+      setup_script: ""
+      working_dir: "/data/working_dir"
+      dir_flags:
+        fs_wal_dir: "/home/ec2-user/efs/tserver-wal"
+        fs_metadata_dir: "/data/tserver-meta"
+        fs_data_dirs: "/data/tserver-data"

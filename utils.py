@@ -49,13 +49,12 @@ def load_experiments(paths):
     return data
 
 
+def load_data(cluster):
+    return
+
+# Returns the metrics parsers.
 def load_experiment_data(experiment):
     exp = {}
-    ycsb_log  = "%s/ycsb-load-workloada.log" % experiment
-    exp['ycsb_start_ts'] = parse_ycsb_start_ts(ycsb_log)
-    exp['ycsb_load_ts'] = YcsbLogParser(ycsb_log).as_numpy_array()
-    summary = json.load(file("%s/ycsb-load-workloada.json" % experiment))
-    exp['ycsb_load_stats'] = dict(((p['metric'], p['measurement']), p['value']) for p in summary)
     parser = MetricsLogParser(
         glob.glob("%s/logs/*metrics*" % experiment),
         simple_metrics=[

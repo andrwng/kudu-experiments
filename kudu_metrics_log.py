@@ -62,7 +62,7 @@ DEFAULT_HISTOGRAM_METRICS = [
 NaN = float('nan')
 UNKNOWN_PERCENTILES = dict(p50=NaN, p95=NaN, p99=NaN, p999=NaN)
 
-def _json_to_map(j):
+def json_to_map(j):
   """
   Parse the JSON structure in the log into a python dictionary
   keyed by <entity>.<metric name>.
@@ -162,7 +162,7 @@ class MetricsLogParser(object):
       else:
         f = file(path)
       for line in f:
-        (_, ts, metrics_json) = line.split(" ", 2)
+        (_, _, log_type, ts, metrics_json) = line.split(" ")
         ts = float(ts) / 1000000.0
         if prev_data and ts < prev_data['ts'] + 30:
           continue

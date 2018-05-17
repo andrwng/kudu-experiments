@@ -37,18 +37,26 @@ LOCAL_LOGS_DIR = os.path.join(BASE_DIR, "logs")
 BASE_OPTS = None
 
 # Runs a command remotely, logging errors and exiting on failure.
-def exec_or_log_error(client, cmd):
+def exec_and_log(client, cmd):
     try:
+        logging.info("Running command: {}".format(cmd))
         stdin, stdout, stderr = client.exec_command(cmd)
     except IOError as e:
-        logging.error("Error executing: {}".format(cmd))
-        for line in stdout:
-            logging.error(line)
+        logging.error("Error executing")
         sys.exit(1)
+    finally:
+        logging.info("STDOUT:")
+        for line in stdout:
+            logging.info(line)
+        logging.info("STDERR:")
+        for line in stderr:
+            logging.error(line)
+
 
 # Manages a set of identical Kudu daemons.
 class Servers(object):
     def __init__(self, bin_type, server_config, secrets):
+        logging.info("Initializing {} servers".format(bin_type))
         self.bin_type = bin_type
         self.config = server_config
         self.secrets = secrets
@@ -62,7 +70,7 @@ class Servers(object):
         # Set the log and fs directory flags.
         self.remote_log_dir = os.path.join(self.remote_working_dir, "logs")
         self.dir_flags = ["--log_dir={}".format(self.remote_log_dir)]
-        self.dirs = [self.remote_log_dir]
+        self.dirs = [self.remote_working_dir, self.remote_log_dir]
         for name, path in self.config['dir_flags'].iteritems():
             self.dir_flags.append("--{}={}".format(name, path))
             self.dirs.extend(path.split(','))
@@ -85,11 +93,17 @@ class Servers(object):
             if addr in self.secrets.keys():
                 secret = self.secrets[addr]
                 logging.info("Reading secrets for {}".format(addr))
+                pkey_password = secret['pkey_password']
+                if len(pkey_password) == 0:
+                    pkey_password = None
                 key = paramiko.RSAKey.from_private_key_file( \
-                    secret['private_key_file'], password=secret['pkey_password'])
+                    secret['private_key_file'], password=pkey_password)
                 logging.info("Logging in with user {}".format(secret['user']))
+                password = secret['password']
+                if len(password) == 0:
+                    password = None
                 client.connect(
-                    hostname=addr, username=secret['user'], password=secret['password'], pkey=key)
+                    hostname=addr, username=secret['user'], password=password, pkey=key)
             else:
                 logging.info("No secrets listed for server")
                 client.connect(hostname=addr)
@@ -97,58 +111,66 @@ class Servers(object):
             self.clients[addr] = client
 
             # Destroy and recreate any directories we might need.
-            exec_or_log_error(client, "rm -rf {}".format(" ".join(self.dirs)))
-            exec_or_log_error(client, "mkdir -p {}".format(" ".join(self.dirs)))
-
-        # Send over the setup script and run setup.
-        if self.setup_script:
-            remote_script = os.path.join(BASE_OPTS['kudu_sbin_dir'], self.setup_script)
-            self.distribute_file(remote_script)
-            exec_or_log_error(remote_script)
-
-        # Distribute the binary file.
-        self.distribute_file(os.path.join(BASE_OPTS['kudu_sbin_dir'], self.bin_type))
+            exec_and_log(client, "sudo rm -rf {}".format(" ".join(self.dirs)))
+            exec_and_log(client, "sudo mkdir -p {}".format(" ".join(self.dirs)))
+            exec_and_log(client, "sudo chown -R {} {}".format(secret['user'], " ".join(self.dirs)))
 
 
     # Runs the binary files across all servers.
     def start(self, flags, port):
+        # Send over the setup script and run setup.
+        if self.setup_script:
+            remote_script = os.path.join(BASE_OPTS['kudu_sbin_dir'], self.setup_script)
+            self.distribute_file(remote_script)
+            exec_and_log(remote_script)
+
+        # Distribute the binary file.
+        self.distribute_file(os.path.join(BASE_OPTS['kudu_sbin_dir'], self.bin_type))
+
         remote_binary = os.path.join(self.remote_working_dir, self.bin_type)
         flags_str = " ".join(self.dir_flags + flags)
+        flags_str += " --block_manager=file --trusted_subnets=0.0.0.0/0"
         for addr in self.addresses:
             logging.info("Starting daemon on server {}".format(addr))
             cmd = "{} {}".format(remote_binary, flags_str)
             logging.info(cmd)
             client = self.clients[addr]
             stdin, stdout, stderr = client.exec_command(cmd)
-
+            logging.info("Waiting a bit for startup")
+            time.sleep(5)
             # Wait for the server to come online.
-            for x in xrange(60):
-                try:
-                    logging.info("Waiting for server {} to come up".format(addr))
-                    urllib2.urlopen("http://{}:{}/".format(addr, port))
-                    break
-                except:
-                    if x == 59:
-                        logging.error("Couldn't ping server...")
-                        for line in stdout.readlines():
-                            logging.error(line)
-                    time.sleep(1)
-                    pass
+            # for x in xrange(60):
+            #     try:
+            #         # TODO: this doesn't work.
+            #         logging.info("Waiting for server {} to come up".format(addr))
+            #         urllib2.urlopen("http://{}:{}/".format(addr, port))
+            #         break
+            #     except:
+            #         if x == 59:
+            #             logging.error("Couldn't ping server...")
+            #             for line in stdout.readlines():
+            #                 logging.error(line)
+            #         time.sleep(1)
+            #         pass
 
     # Send a local file at 'src' to the servers, putting it in the remote
     # working directory. If the file already exists on a server, that server
     # will be skipped.
+    # TODO: chmod +x file
     def distribute_file(self, src):
         logging.info("Distributing file {}".format(src))
         remote_file = self.remote_file(os.path.basename(src))
+        logging.info("Copying to remote file {}".format(remote_file))
         for addr in self.addresses:
-            sftp_client = self.clients[addr].open_sftp()
+            client = self.clients[addr]
+            sftp_client = client.open_sftp()
             try:
                 sftp_client.stat(remote_file)
                 logging.info("File already exists on {}".format(addr))
             except IOError:
                 sftp_client.put(src, remote_file)
             sftp_client.close()
+            client.exec_command("chmod +x {}".format(remote_file))
 
     # Return the name of a file in the remote working directory.
     def remote_file(self, filename):
@@ -178,13 +200,13 @@ class Servers(object):
     def stop(self):
         for addr in self.addresses:
             client = self.clients[addr]
-            exec_or_log_error(client, "pkill {}".format(self.bin_type))
+            exec_and_log(client, "pkill {}".format(self.bin_type))
 
     # Delete the server's contents.
     def cleanup(self):
         for addr in self.addresses:
             client = self.clients[addr]
-            exec_or_log_error(client, "rm -rf {}".format(" ".join(self.dirs)))
+            exec_and_log(client, "rm -rf {}".format(" ".join(self.dirs)))
 
     # Close any existing connections to servers.
     def close(self):
