@@ -36,17 +36,15 @@ import sys
 # The first element of each tuple is the metric name.
 # The second is the name that will be used in the TSV header line.
 DEFAULT_SIMPLE_METRICS = [
-  ("server.generic_current_allocated_bytes", "heap_allocated"),
   ("server.log_block_manager_bytes_under_management", "bytes_on_disk"),
   ("tablet.memrowset_size", "mrs_size"),
-  ("server.block_cache_usage", "bc_usage"),
 ]
 
 # These metrics will be extracted as per-second rates into the TSV.
 DEFAULT_RATE_METRICS = [
-  ("server.block_manager_total_bytes_read", "bytes_r_per_sec"),
-  ("server.block_manager_total_bytes_written", "bytes_w_per_sec"),
-  ("server.block_cache_lookups", "bc_lookups_per_sec"),
+  ("tablet.log_bytes_logged", "log_bytes_w_per_sec"),
+  ("server.block_manager_total_bytes_read", "bm_bytes_r_per_sec"),
+  ("server.block_manager_total_bytes_written", "bm_bytes_w_per_sec"),
   ("tablet.rows_inserted", "inserts_per_sec"),
 ]
 
@@ -55,14 +53,14 @@ DEFAULT_RATE_METRICS = [
 # percentile numbers suffixed to the column name provided here (foo_p95,
 # foo_p99, etc)
 DEFAULT_HISTOGRAM_METRICS = [
-  ("server.handler_latency_kudu_tserver_TabletServerService_Write", "write"),
+  ("tablet.op_prepare_queue_length", "prepare_queue_length"),
   ("tablet.log_append_latency", "log")
 ]
 
 NaN = float('nan')
 UNKNOWN_PERCENTILES = dict(p50=NaN, p95=NaN, p99=NaN, p999=NaN)
 
-def json_to_map(j):
+def _json_to_map(j):
   """
   Parse the JSON structure in the log into a python dictionary
   keyed by <entity>.<metric name>.
@@ -76,6 +74,7 @@ def json_to_map(j):
   ret = {}
   for entity in j:
     for m in entity['metrics']:
+      print("type: {}".format(entity['type']))
       ret[entity['type'] + "." + m['name']] = m
   return ret
 
