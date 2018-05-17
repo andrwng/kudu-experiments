@@ -36,7 +36,7 @@ import sys
 # The first element of each tuple is the metric name.
 # The second is the name that will be used in the TSV header line.
 DEFAULT_SIMPLE_METRICS = [
-  ("server.log_block_manager_bytes_under_management", "bytes_on_disk"),
+  ("server.log_block_manager_bytes_under_management", "lbm_bytes_on_disk"),
   ("tablet.memrowset_size", "mrs_size"),
 ]
 
@@ -74,7 +74,6 @@ def _json_to_map(j):
   ret = {}
   for entity in j:
     for m in entity['metrics']:
-      print("type: {}".format(entity['type']))
       ret[entity['type'] + "." + m['name']] = m
   return ret
 
@@ -118,26 +117,14 @@ def _histogram_stats(prev, cur, m):
       res['p999'] = cur_val
   return res
 
-def _cache_hit_ratio(prev, cur):
-  """
-  Calculate the cache hit ratio between the two samples.
-  If there were no cache hits or misses, this returns NaN.
-  """
-  delta_hits = _delta(prev, cur, 'server.block_cache_hits_caching')
-  delta_misses = _delta(prev, cur, 'server.block_cache_misses_caching')
-  if delta_hits + delta_misses > 0:
-    cache_ratio = float(delta_hits) / (delta_hits + delta_misses)
-  else:
-    cache_ratio = NaN
-  return cache_ratio
-
-
 
 class MetricsLogParser(object):
   def __init__(self, paths,
+               min_interval_secs=30,
                simple_metrics=DEFAULT_SIMPLE_METRICS,
                rate_metrics=DEFAULT_RATE_METRICS,
                histogram_metrics=DEFAULT_HISTOGRAM_METRICS):
+    self.min_interval_secs = min_interval_secs
     self.paths = paths
     self.simple_metrics = simple_metrics
     self.rate_metrics = rate_metrics
@@ -150,7 +137,7 @@ class MetricsLogParser(object):
       simple_headers.append(header + "_p95")
       simple_headers.append(header + "_p99")
       simple_headers.append(header + "_p999")
-    return tuple(["time", "cache_hit_ratio"] + simple_headers)
+    return tuple(["time"] + simple_headers)
 
   def __iter__(self):
     prev_data = None
@@ -163,7 +150,7 @@ class MetricsLogParser(object):
       for line in f:
         (_, _, log_type, ts, metrics_json) = line.split(" ")
         ts = float(ts) / 1000000.0
-        if prev_data and ts < prev_data['ts'] + 30:
+        if prev_data and ts < prev_data['ts'] + self.min_interval_secs:
           continue
         data = _json_to_map(json.loads(metrics_json))
         data['ts'] = ts
@@ -174,7 +161,6 @@ class MetricsLogParser(object):
   def _process(self, prev, cur):
     """ Process a pair of metric snapshots, returning a tuple. """
     delta_ts = cur['ts'] - prev['ts']
-    cache_ratio = _cache_hit_ratio(prev, cur)
     calc_vals = []
     for metric, _ in self.simple_metrics:
       if metric in cur:
@@ -186,7 +172,7 @@ class MetricsLogParser(object):
       stats = _histogram_stats(prev, cur, metric)
       calc_vals.extend([stats['p50'], stats['p95'], stats['p99'], stats['p999']])
 
-    return tuple([(cur['ts'] + prev['ts'])/2, cache_ratio] + calc_vals)
+    return tuple([(cur['ts'] + prev['ts'])/2] + calc_vals)
 
 def main(argv):
   p = MetricsLogParser(argv[1:])
