@@ -64,13 +64,13 @@ class Servers(object):
         self.setup_script = None
         self.remote_binary = None
         if len(self.config['setup_script']) > 0:
-            self.setup_script = os.path.abspath(self.config['setup_script'])
+            self.setup_script = self.config['setup_script']
         self.remote_working_dir = self.config['working_dir']
 
         # Set the log and fs directory flags.
         self.remote_log_dir = os.path.join(self.remote_working_dir, "logs")
         self.dir_flags = ["--log_dir={}".format(self.remote_log_dir)]
-        self.dirs = [self.remote_working_dir, self.remote_log_dir]
+        self.dirs = [self.remote_log_dir]
         for name, path in self.config['dir_flags'].iteritems():
             self.dir_flags.append("--{}={}".format(name, path))
             self.dirs.extend(path.split(','))
@@ -137,21 +137,7 @@ class Servers(object):
             client = self.clients[addr]
             stdin, stdout, stderr = client.exec_command(cmd)
             logging.info("Waiting a bit for startup")
-            time.sleep(5)
-            # Wait for the server to come online.
-            # for x in xrange(60):
-            #     try:
-            #         # TODO: this doesn't work.
-            #         logging.info("Waiting for server {} to come up".format(addr))
-            #         urllib2.urlopen("http://{}:{}/".format(addr, port))
-            #         break
-            #     except:
-            #         if x == 59:
-            #             logging.error("Couldn't ping server...")
-            #             for line in stdout.readlines():
-            #                 logging.error(line)
-            #         time.sleep(1)
-            #         pass
+            time.sleep(3)
 
     # Send a local file at 'src' to the servers, putting it in the remote
     # working directory. If the file already exists on a server, that server
@@ -262,11 +248,15 @@ class Cluster:
         self.tservers.collect_metrics(tservers_log_dir)
 
     # Run a command, with cluster-specific environment variables set.
-    def run_workload(self, cmd):
-        out = subprocess.check_output(cmd, env=self.cluster_env)
-        logging.info("Running command: {}".format(cmd))
-        logging.info(out)
-        time.sleep(1)
+    def run_workload(self, cmd, timeout):
+        try:
+            # cmd = "timeout -k {} bash {}".format(timeout, cmd)
+            logging.info("Running command: {}".format(cmd))
+            out = subprocess.check_output(cmd, env=self.cluster_env)
+            logging.info(out)
+        except:
+            logging.info("Done!")
+
 
     # Stop the Kudu processes on the remote hosts.
     def stop_servers(self):
@@ -321,7 +311,7 @@ def main():
             logging.info("Running workload {}".format(wname))
             workload_script = os.path.join(WORKLOADS_DIR, workload["script"])
             cluster.start_servers()
-            cluster.run_workload(workload_script)
+            cluster.run_workload(workload_script, workload["max_execution_time"])
             cluster.stop_servers()
 
             # Create the appropriate directories for metrics.

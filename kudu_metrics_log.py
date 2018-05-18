@@ -148,7 +148,13 @@ class MetricsLogParser(object):
       else:
         f = file(path)
       for line in f:
-        (_, _, log_type, ts, metrics_json) = line.split(" ")
+        try:
+          (_, _, log_type, ts, metrics_json) = line.split()
+        except ValueError:
+          continue
+        if not log_type == "metrics":
+          continue
+
         ts = float(ts) / 1000000.0
         if prev_data and ts < prev_data['ts'] + self.min_interval_secs:
           continue
