@@ -2,7 +2,7 @@
 base_opts:
   # Local path to find kudu-tserver, kudu-master, and kudu binaries. This is to
   # your $PATH. If empty, these binaries should already be on your $PATH.
-  kudu_sbin_dir: "/data"
+  kudu_sbin_dir: "/data/8/awong/Repositories/kudu/build/release/bin"
 
   # Local path under which to place metrics.
   kudu_logs_dir: "/home/ec2-user/kudu-experiments/logs"
@@ -17,75 +17,80 @@ base_opts:
       max_execution_time: "600"
       script: "sequential_insert.sh"
 
+# Each machine is set up before running any scripts to load them with the
+# appropiate binaries and setup with the appropriate scripts.
+hosts:
+  ec2-ephemeral:
+    # Address at which to find the machine.
+    address: "ec2-35-167-217-0.us-west-2.compute.amazonaws.com"
+
+    # Script to be run upon connecting to the machine. It is best practice
+    # for this script to be idempotent, and for anything workload- or
+    # cluster-specific to be specified elsewhere. These should be found in
+    # $PWD/scripts.
+    #
+    # E.g. this is helpful for setting up SASL requirements to run Kudu.
+    setup_script: "install_prereqs_cen7.sh"
+
+    # Remote location in which to send/find the kudu binaries. If the
+    # directory does not already exist remotely, it will be created.
+    bin_dir: "/data/bin"
+
+    # Files to send over from `kudu_sbin_dir` if they can't be found in the
+    # remote `bin_dir`.
+    bin_files:
+      - "kudu-master"
+      - "kudu-tserver"
+      - "kudu"
+
+  va1022:
+    address: "va1022.halxg.cloudera.com"
+    setup_script: ""
+    remote_bin_dir: "/data/8/awong/Repositories/kudu/build/release/bin"
+    bin_files:
+      - "kudu-master"
+      - "kudu-tserver"
+      - "kudu"
+
 clusters:
   va1022-only:
     masters:
-      # Addresses of the servers.
-      addresses:
-        - "va1022.halxg.cloudera.com"
-
-      # Local path to any setup script.
-      setup_script: ""
-
-      # Remote directory in which to put binaries, scripts, logs, etc.
-      working_dir: "/data/8/awong/exp"
+      # Hosts on which to set up the masters. Must exist as an entry of `hosts`
+      # in `base_opts`.
+      hosts:
+        - "va1022"
 
       # Directory flags needed for Kudu to run.
       dir_flags:
         fs_wal_dir: "/data/1/awong/exp"
         fs_metadata_dir: "/data/1/awong/exp"
         fs_data_dirs: "/data/2/awong/exp"
+        log_dir: "/data/8/awong/exp/logs"
 
     tservers:
-      addresses:
-        - "va1022.halxg.cloudera.com"
-      setup_script: ""
-      working_dir: "/data/8/awong/exp"
+      hosts:
+        - "va1022"
       dir_flags:
         fs_wal_dir: "/data/3/awong/exp"
         fs_metadata_dir: "/data/3/awong/exp"
         fs_data_dirs: "/data/4/awong/exp"
-  vpc:
+        log_dir: "/data/8/awong/exp/logs"
+
+  ec2-only:
     masters:
-      addresses:
-        - "awong-cen73.vpc.cloudera.com"
-      setup_script: ""
-      working_dir: "/data/working_dir"
+      hosts:
+        - "ec2-ephemeral"
       dir_flags:
         fs_wal_dir: "/data/master-wal"
         fs_metadata_dir: "/data/master-meta"
         fs_data_dirs: "/data/master-data"
+        log_dir: "/data/master-logs"
 
     tservers:
-      addresses:
-        - "awong-cen73.vpc.cloudera.com"
-      setup_script: ""
-      working_dir: "/data/working_dir"
-      dir_flags:
-        fs_wal_dir: "/data/tserver-wal"
-        fs_metadata_dir: "/data/tserver-meta"
-        fs_data_dirs: "/data/tserver-data"
-  ec2:
-    masters:
-      addresses:
-        - "ec2-54-200-233-156.us-west-2.compute.amazonaws.com"
-      setup_script: ""
-      working_dir: "/data/working_dir"
-      dir_flags:
-        fs_wal_dir: "/data/master-wal"
-        fs_metadata_dir: "/data/master-meta"
-        fs_data_dirs: "/data/master-data"
-
-    tservers:
-      addresses:
-        - "ec2-54-200-233-156.us-west-2.compute.amazonaws.com"
-      # TODO:
-      # - install pip
-      # - install aws cli
-      # - open up ports
-      setup_script: ""
-      working_dir: "/data/working_dir"
+      hosts:
+        - "ec2-ephemeral"
       dir_flags:
         fs_wal_dir: "/home/ec2-user/efs/tserver-wal"
         fs_metadata_dir: "/data/tserver-meta"
         fs_data_dirs: "/data/tserver-data"
+        log_dir: "/data/tserver-logs"
