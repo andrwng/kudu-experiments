@@ -1,11 +1,10 @@
 # The base opts.
 base_opts:
-  # Local path to find kudu-tserver, kudu-master, and kudu binaries. This is to
-  # your $PATH. If empty, these binaries should already be on your $PATH.
-  kudu_sbin_dir: "/data/8/awong/Repositories/kudu/build/release/bin"
+  # Local path to find /www.
+  kudu_home: "/data/8/awong/Repositories/kudu"
 
-  # Local path under which to place metrics.
-  kudu_logs_dir: "/home/ec2-user/kudu-experiments/logs"
+  # Local path to find kudu-tserver, kudu-master, and kudu binaries.
+  kudu_sbin_dir: "/data/8/awong/Repositories/kudu/build/release/bin"
 
   # The interval at which metrics are polled from Kudu.
   metrics_interval_secs: "30"
@@ -13,73 +12,76 @@ base_opts:
   # Path to scripts to run as the workload.
   # Each workload will be run.
   workloads:
-    inserts:
-      max_execution_time: "600"
+    sequential:
+      max_execution_time: "4800"
       script: "sequential_insert.sh"
+    random:
+      max_execution_time: "4800"
+      script: "random_insert.sh"
 
 # Each machine is set up before running any scripts to load them with the
 # appropiate binaries and setup with the appropriate scripts.
 hosts:
-  ec2-ephemeral:
-    # Address at which to find the machine.
-    address: "ec2-35-167-217-0.us-west-2.compute.amazonaws.com"
-
-    # Script to be run upon connecting to the machine. It is best practice
-    # for this script to be idempotent, and for anything workload- or
-    # cluster-specific to be specified elsewhere. These should be found in
-    # $PWD/scripts.
-    #
-    # E.g. this is helpful for setting up SASL requirements to run Kudu.
+  ec2-xl:
+    address: "35.160.54.43"
     setup_script: "install_prereqs_cen7.sh"
-
-    # Remote location in which to send/find the kudu binaries. If the
-    # directory does not already exist remotely, it will be created.
     bin_dir: "/data/bin"
-
-    # Files to send over from `kudu_sbin_dir` if they can't be found in the
-    # remote `bin_dir`.
     bin_files:
       - "kudu-master"
       - "kudu-tserver"
       - "kudu"
 
-  va1022:
-    address: "va1022.halxg.cloudera.com"
-    setup_script: ""
-    remote_bin_dir: "/data/8/awong/Repositories/kudu/build/release/bin"
+  ec2-efs:
+    address: "35.160.54.43"
+    setup_script: "install_prereqs_cen7_efs.sh"
+    bin_dir: "/data/bin"
     bin_files:
       - "kudu-master"
       - "kudu-tserver"
       - "kudu"
 
 clusters:
-  va1022-only:
-    masters:
-      # Hosts on which to set up the masters. Must exist as an entry of `hosts`
-      # in `base_opts`.
-      hosts:
-        - "va1022"
-
-      # Directory flags needed for Kudu to run.
-      dir_flags:
-        fs_wal_dir: "/data/1/awong/exp"
-        fs_metadata_dir: "/data/1/awong/exp"
-        fs_data_dirs: "/data/2/awong/exp"
-        log_dir: "/data/8/awong/exp/logs"
-
+  ec2-efs:
     tservers:
       hosts:
-        - "va1022"
+        # Must be an entry in `hosts`.
+        - "ec2-efs"
       dir_flags:
-        fs_wal_dir: "/data/3/awong/exp"
-        fs_metadata_dir: "/data/3/awong/exp"
-        fs_data_dirs: "/data/4/awong/exp"
-        log_dir: "/data/8/awong/exp/logs"
-
-  ec2-only:
+        fs_wal_dir: "/data/efs/tserver-wal"
+        fs_metadata_dir: "/data/efs/tserver-meta"
+        fs_data_dirs: "/mnte/tserver-data"
+        log_dir: "/mnte/tserver-logs"
     masters:
       hosts:
-        - "ec2-ephemeral"
+        - "ec2-efs"
+      dir_flags:
+        fs_wal_dir: "/mnte/master-wal"
+        fs_metadata_dir: "/mnte/master-meta"
+        fs_data_dirs: "/mnte/master-data"
+        log_dir: "/mnte/master-logs"
+
+  ec2-ephemeral:
+    tservers:
+      hosts:
+        - "ec2-xl"
+      dir_flags:
+        fs_wal_dir: "/mntd/tserver-wal"
+        fs_metadata_dir: "/mntd/tserver-meta"
+        fs_data_dirs: "/mntd/tserver-data"
+        log_dir: "/mntd/tserver-logs"
+    masters:
+      hosts:
+        - "ec2-xl"
+      dir_flags:
+        fs_wal_dir: "/mntd/master-wal"
+        fs_metadata_dir: "/mntd/master-meta"
+        fs_data_dirs: "/mntd/master-data"
+        log_dir: "/mntd/master-logs"
+
+  medium-machine:
+    masters:
+      hosts:
+        - "medium"
       dir_flags:
         fs_wal_dir: "/data/master-wal"
         fs_metadata_dir: "/data/master-meta"

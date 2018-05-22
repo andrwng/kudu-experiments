@@ -1,5 +1,0 @@
-WIP
-Requires Kudu version 1.7+
-
-
-Note: workloads must expect master addresses in the form of the environment variable $KUDU_MASTERS.
