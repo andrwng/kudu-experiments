@@ -36,14 +36,13 @@ import sys
 # The first element of each tuple is the metric name.
 # The second is the name that will be used in the TSV header line.
 DEFAULT_SIMPLE_METRICS = [
-  ("server.log_block_manager_bytes_under_management", "lbm_bytes_on_disk"),
   ("tablet.memrowset_size", "mrs_size"),
 ]
 
 # These metrics will be extracted as per-second rates into the TSV.
 DEFAULT_RATE_METRICS = [
+  ("tablet.transaction_memory_pressure_rejections", "mem_rejections_per_sec"),
   ("tablet.log_bytes_logged", "log_bytes_w_per_sec"),
-  ("server.block_manager_total_bytes_read", "bm_bytes_r_per_sec"),
   ("server.block_manager_total_bytes_written", "bm_bytes_w_per_sec"),
   ("tablet.rows_inserted", "inserts_per_sec"),
 ]
@@ -53,8 +52,14 @@ DEFAULT_RATE_METRICS = [
 # percentile numbers suffixed to the column name provided here (foo_p95,
 # foo_p99, etc)
 DEFAULT_HISTOGRAM_METRICS = [
+  ("tablet.bloom_lookups_per_op", "bloom_lookups"),
+  ("server.rpc_incoming_queue_time", "rpc_queue_time"),
+  ("server.handler_latency_kudu_tserver_TabletServerService_Write", "write"),
   ("tablet.op_prepare_queue_length", "prepare_queue_length"),
-  ("tablet.log_append_latency", "log")
+  ("tablet.log_append_latency", "log_append_us"),
+  ("server.op_apply_queue_length", "apply_queue_length"),
+  ("server.op_apply_queue_time", "apply_queue_time_us"),
+  ("server.op_apply_run_time", "apply_run_time_us")
 ]
 
 NaN = float('nan')

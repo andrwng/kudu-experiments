@@ -6,25 +6,47 @@ base_opts:
   # Local path to find kudu-tserver, kudu-master, and kudu binaries.
   kudu_sbin_dir: "/data/8/awong/Repositories/kudu/build/release/bin"
 
-  # The interval at which metrics are polled from Kudu.
-  metrics_interval_secs: "30"
-
   # Path to scripts to run as the workload.
   # Each workload will be run.
   workloads:
-    sequential:
-      max_execution_time: "4800"
-      script: "sequential_insert.sh"
-    random:
-      max_execution_time: "4800"
-      script: "random_insert.sh"
+    #stress_throughput_many_tablets_range:
+    #  max_execution_time: "1800"
+    #  script: "stress_throughput_many_tablets_range.sh"
+     true_seq_2bucket_1024:
+       max_execution_time: "1800"
+       script: "true_seq_large.sh"
+    # sequential_auto:
+    #   max_execution_time: "4800"
+    #   script: "sequential_insert_auto_flush.sh"
+    # sequential:
+    #   max_execution_time: "4800"
+    #   script: "sequential_insert.sh"
+    # random:
+    #   max_execution_time: "4800"
+    #   script: "random_insert.sh"
 
 # Each machine is set up before running any scripts to load them with the
 # appropiate binaries and setup with the appropriate scripts.
 hosts:
+  # ec2-ebs:
+  #   address: "35.162.239.103"
+  #   setup_script: "install_prereqs_cen7_ebs.sh"
+  #   setup_env:
+  #     EBS_DEVICE: "/dev/xvdf"
+  #     EBS_MOUNTPOINT: "/data/ebs"
+  #     DEVICE: "/mntb"
+  #     MOUNTPOINT: "/dev/xvdd"
+  #   bin_dir: "/data/bin"
+  #   bin_files:
+  #     - "kudu-master"
+  #     - "kudu-tserver"
+  #     - "kudu"
   ec2-xl:
-    address: "35.160.54.43"
+    address: "35.162.239.103"
     setup_script: "install_prereqs_cen7.sh"
+    setup_env:
+      DEVICE: "/dev/nvme0n1"
+      MOUNTPOINT: "/mntd"
     bin_dir: "/data/bin"
     bin_files:
       - "kudu-master"
@@ -32,8 +54,13 @@ hosts:
       - "kudu"
 
   ec2-efs:
-    address: "35.160.54.43"
+    address: "35.162.239.103"
     setup_script: "install_prereqs_cen7_efs.sh"
+    setup_env:
+      EFS_IP: "172.31.42.25"
+      EFS_MOUNTPOINT: "/data/efs"
+      DEVICE: "/dev/nvme0n1"
+      MOUNTPOINT: "/mntd"
     bin_dir: "/data/bin"
     bin_files:
       - "kudu-master"
@@ -41,6 +68,24 @@ hosts:
       - "kudu"
 
 clusters:
+  # ec2-ebs:
+  #   tservers:
+  #     hosts:
+  #       - "ec2-ebs"
+  #     dir_flags:
+  #       fs_wal_dir: "/data/ebs/tserver-wal"
+  #       fs_metadata_dir: "/data/ebs/tserver-meta"
+  #       fs_data_dirs: "/mntb/tserver-data"
+  #       log_dir: "/mntb/tserver-logs"
+  #   masters:
+  #     hosts:
+  #       - "ec2-ebs"
+  #     dir_flags:
+  #       fs_wal_dir: "/mntb/master-wal"
+  #       fs_metadata_dir: "/mntb/master-meta"
+  #       fs_data_dirs: "/mntb/master-data"
+  #       log_dir: "/mntb/master-logs"
+
   ec2-efs:
     tservers:
       hosts:
@@ -49,16 +94,19 @@ clusters:
       dir_flags:
         fs_wal_dir: "/data/efs/tserver-wal"
         fs_metadata_dir: "/data/efs/tserver-meta"
-        fs_data_dirs: "/mnte/tserver-data"
-        log_dir: "/mnte/tserver-logs"
+        fs_data_dirs: "/mntd/tserver-data"
+        log_dir: "/mntd/tserver-logs"
+      flags:
+        - "--unlock_unsafe_flags=true"
+        - "--enable_maintenance_manager=false"
     masters:
       hosts:
         - "ec2-efs"
       dir_flags:
-        fs_wal_dir: "/mnte/master-wal"
-        fs_metadata_dir: "/mnte/master-meta"
-        fs_data_dirs: "/mnte/master-data"
-        log_dir: "/mnte/master-logs"
+        fs_wal_dir: "/mntd/master-wal"
+        fs_metadata_dir: "/mntd/master-meta"
+        fs_data_dirs: "/mntd/master-data"
+        log_dir: "/mntd/master-logs"
 
   ec2-ephemeral:
     tservers:
@@ -69,6 +117,9 @@ clusters:
         fs_metadata_dir: "/mntd/tserver-meta"
         fs_data_dirs: "/mntd/tserver-data"
         log_dir: "/mntd/tserver-logs"
+      flags:
+        - "--unlock_unsafe_flags=true"
+        - "--enable_maintenance_manager=false"
     masters:
       hosts:
         - "ec2-xl"

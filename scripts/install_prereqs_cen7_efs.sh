@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -ex 
 
 sudo yum -y update
 sudo yum -y install autoconf automake cyrus-sasl-devel cyrus-sasl-gssapi \
@@ -8,13 +9,14 @@ sudo yum -y install autoconf automake cyrus-sasl-devel cyrus-sasl-gssapi \
 
 sudo yum -y install nfs-utils
 
-if [[ ! -d /data/efs ]]; then
-  sudo mkdir /data/efs
-  sudo mount -t nfs -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport 172.31.42.25:/   /data/efs
+if [[ ! -d $MOUNTPOINT ]]; then
+  sudo mkdir $MOUNTPOINT
+  sudo mkfs.ext4 $DEVICE
+  sudo mount -t ext4 $DEVICE $MOUNTPOINT
 fi
 
-if [[ ! -d /mnte ]]; then
-  sudo mkdir /mnte
-  sudo mkfs.ext4 /dev/xvdc
-  sudo mount -t ext4 /dev/xvdc /mnte
+if [[ ! -d $EFS_MOUNTPOINT ]]; then
+  sudo mkdir $EFS_MOUNTPOINT
+  sudo mount -t nfs -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport $EFS_IP:/   $EFS_MOUNTPOINT
 fi
+

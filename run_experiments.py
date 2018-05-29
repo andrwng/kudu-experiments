@@ -94,9 +94,13 @@ class Servers(object):
             client.close()
 
     # Runs the binary files across all servers.
-    def start(self, server_flags, port):
+    def start(self, server_flags, port, polling_interval=None):
         extra_flags = ["--block_manager=file", "--trusted_subnets=0.0.0.0/0"]
         flags_str = " ".join(self.dir_flags + server_flags + extra_flags)
+        if "flags" in self.config:
+            flags_str += " " + " ".join(self.config["flags"])
+        if polling_interval:
+          flags_str += " --metrics_polling_interval_ms={}".format(polling_interval * 1000)
         # Some extra flags need to be added per server; namely:
         # - the advertised address for RPCs
         # - the KUDU_HOME directory for each server
@@ -138,7 +142,7 @@ class Servers(object):
     def stop(self):
         for addr, _ in self.addresses_and_bin:
             client = connect_to_host(addr)
-            exec_and_log(client, "pkill {}".format(self.bin_type))
+            exec_and_log(client, "sudo pkill {}".format(self.bin_type))
             client.close()
 
     # Delete the server's contents.
@@ -172,7 +176,7 @@ class Cluster(object):
         self.tservers.setup()
 
     # Start the servers and wait for them to come online.
-    def start_servers(self):
+    def start_servers(self, tserver_polling_interval=None):
         logging.info("Starting masters")
         master_flags = []
         if len(self.masters.addresses_and_bin) > 1:
@@ -180,9 +184,8 @@ class Cluster(object):
         self.masters.start(master_flags, "8051")
 
         logging.info("Starting tservers")
-        tserver_flags = ["--metrics_log_interval_ms=1000"]
-        tserver_flags.append("--tserver_master_addrs={}".format(self.master_addrs))
-        self.tservers.start(tserver_flags, "8050")
+        tserver_flags = ["--tserver_master_addrs={}".format(self.master_addrs)]
+        self.tservers.start(tserver_flags, "8050", tserver_polling_interval)
 
     # Collect the metrics cluster-wide and place them in the local directory
     # 'dir_name'. 'dir_name' must already exist.
@@ -293,6 +296,10 @@ def send_recursively(sftp_client, src, dst):
 def setup_host(host_config):
     setup_script = host_config["setup_script"]
     address = host_config["address"]
+    setup_env_str = ""
+    if "setup_env" in host_config.keys():
+        setup_env = host_config["setup_env"]
+        setup_env_str = "env " + " ".join(["{}={}".format(k, v) for k, v in setup_env.iteritems()])
 
     # Make a connection with the host.
     client = connect_to_host(address)
@@ -317,7 +324,7 @@ def setup_host(host_config):
         exec_and_log(client, "sudo chmod +x {}".format(remote_bin_file))
 
     # Run the setup script.
-    exec_and_log(client, "sudo {}".format(remote_setup_script))
+    exec_and_log(client, "{} sudo -E {}".format(setup_env_str, remote_setup_script))
 
     # Send over the Kudu /www files.
     send_recursively(sftp_client, os.path.join(BASE_OPTS["kudu_home"], "www"), \
@@ -431,6 +438,8 @@ def main():
             metrics_dir = os.path.join(LOCAL_LOGS_DIR, wname + time_suffix, cname)
             subprocess.check_output(["mkdir", "-p", metrics_dir])
             cluster.collect_metrics(metrics_dir)
+
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
