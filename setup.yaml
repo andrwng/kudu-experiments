@@ -1,10 +1,10 @@
 # The base opts.
 base_opts:
   # Local path to find /www.
-  kudu_home: "/data/8/awong/Repositories/kudu"
+  kudu_home: "/home/ec2-user/kudu"
 
   # Local path to find kudu-tserver, kudu-master, and kudu binaries.
-  kudu_sbin_dir: "/data/8/awong/Repositories/kudu/build/release/bin"
+  kudu_sbin_dir: "/home/ec2-user/foobar"
 
   # Path to scripts to run as the workload.
   # Each workload will be run.
@@ -12,9 +12,10 @@ base_opts:
     #stress_throughput_many_tablets_range:
     #  max_execution_time: "1800"
     #  script: "stress_throughput_many_tablets_range.sh"
-     true_seq_2bucket_1024:
-       max_execution_time: "1800"
-       script: "true_seq_large.sh"
+    range:
+      # seq_2buckets_50threads_size256_lbm_auto_flush_long:
+      max_execution_time: "600"
+      script: "sequential_insert_range.sh"
     # sequential_auto:
     #   max_execution_time: "4800"
     #   script: "sequential_insert_auto_flush.sh"
@@ -28,21 +29,8 @@ base_opts:
 # Each machine is set up before running any scripts to load them with the
 # appropiate binaries and setup with the appropriate scripts.
 hosts:
-  # ec2-ebs:
-  #   address: "35.162.239.103"
-  #   setup_script: "install_prereqs_cen7_ebs.sh"
-  #   setup_env:
-  #     EBS_DEVICE: "/dev/xvdf"
-  #     EBS_MOUNTPOINT: "/data/ebs"
-  #     DEVICE: "/mntb"
-  #     MOUNTPOINT: "/dev/xvdd"
-  #   bin_dir: "/data/bin"
-  #   bin_files:
-  #     - "kudu-master"
-  #     - "kudu-tserver"
-  #     - "kudu"
   ec2-xl:
-    address: "35.162.239.103"
+    address: "34.219.187.199"
     setup_script: "install_prereqs_cen7.sh"
     setup_env:
       DEVICE: "/dev/nvme0n1"
@@ -53,11 +41,11 @@ hosts:
       - "kudu-tserver"
       - "kudu"
 
-  ec2-efs:
-    address: "35.162.239.103"
+  ec2-large2:
+    address: "54.200.86.157"
     setup_script: "install_prereqs_cen7_efs.sh"
     setup_env:
-      EFS_IP: "172.31.42.25"
+      EFS_IP: "172.31.38.55"
       EFS_MOUNTPOINT: "/data/efs"
       DEVICE: "/dev/nvme0n1"
       MOUNTPOINT: "/mntd"
@@ -67,41 +55,108 @@ hosts:
       - "kudu-tserver"
       - "kudu"
 
-clusters:
-  # ec2-ebs:
-  #   tservers:
-  #     hosts:
-  #       - "ec2-ebs"
-  #     dir_flags:
-  #       fs_wal_dir: "/data/ebs/tserver-wal"
-  #       fs_metadata_dir: "/data/ebs/tserver-meta"
-  #       fs_data_dirs: "/mntb/tserver-data"
-  #       log_dir: "/mntb/tserver-logs"
-  #   masters:
-  #     hosts:
-  #       - "ec2-ebs"
-  #     dir_flags:
-  #       fs_wal_dir: "/mntb/master-wal"
-  #       fs_metadata_dir: "/mntb/master-meta"
-  #       fs_data_dirs: "/mntb/master-data"
-  #       log_dir: "/mntb/master-logs"
+  ec2-large:
+    address: "54.213.207.48"
+    setup_script: "install_prereqs_cen7_efs.sh"
+    setup_env:
+      EFS_IP: "172.31.38.55"
+      EFS_MOUNTPOINT: "/data/efs"
+      DEVICE: "/dev/nvme0n1"
+      MOUNTPOINT: "/mntd"
+    bin_dir: "/data/bin"
+    bin_files:
+      - "kudu-master"
+      - "kudu-tserver"
+      - "kudu"
 
-  ec2-efs:
+  ec2-efs-perf:
+    address: "34.219.187.199"
+    setup_script: "install_prereqs_cen7_efs.sh"
+    setup_env:
+      EFS_IP: "172.31.38.55"
+      EFS_MOUNTPOINT: "/data/efs"
+      DEVICE: "/dev/nvme0n1"
+      MOUNTPOINT: "/mntd"
+    bin_dir: "/data/bin"
+    bin_files:
+      - "kudu-master"
+      - "kudu-tserver"
+      - "kudu"
+
+  ec2-efs-gen1:
+    address: "34.219.187.199"
+    setup_script: "install_prereqs_cen7_efs.sh"
+    setup_env:
+      EFS_IP: "172.31.38.254"
+      EFS_MOUNTPOINT: "/data/efs-general"
+      DEVICE: "/dev/nvme0n1"
+      MOUNTPOINT: "/mntd"
+    bin_dir: "/data/bin"
+    bin_files:
+      - "kudu-master"
+      - "kudu-tserver"
+      - "kudu"
+  ec2-efs-gen2:
+    address: "54.200.86.157"
+    setup_script: "install_prereqs_cen7_efs.sh"
+    setup_env:
+      EFS_IP: "172.31.38.254"
+      EFS_MOUNTPOINT: "/data/efs-general"
+      DEVICE: "/dev/nvme0n1"
+      MOUNTPOINT: "/mntd"
+    bin_dir: "/data/bin"
+    bin_files:
+      - "kudu-master"
+      - "kudu-tserver"
+      - "kudu"
+
+  ec2-efs-gen3:
+    address: "54.213.207.48"
+    setup_script: "install_prereqs_cen7_efs.sh"
+    setup_env:
+      EFS_IP: "172.31.38.254"
+      EFS_MOUNTPOINT: "/data/efs-general"
+      DEVICE: "/dev/nvme0n1"
+      MOUNTPOINT: "/mntd"
+    bin_dir: "/data/bin"
+    bin_files:
+      - "kudu-master"
+      - "kudu-tserver"
+      - "kudu"
+
+clusters:
+  ec2-efs-perf:
     tservers:
-      hosts:
-        # Must be an entry in `hosts`.
-        - "ec2-efs"
-      dir_flags:
-        fs_wal_dir: "/data/efs/tserver-wal"
-        fs_metadata_dir: "/data/efs/tserver-meta"
-        fs_data_dirs: "/mntd/tserver-data"
-        log_dir: "/mntd/tserver-logs"
-      flags:
-        - "--unlock_unsafe_flags=true"
-        - "--enable_maintenance_manager=false"
+      - hosts:
+          # Must be an entry in `hosts`.
+          - "ec2-efs-perf"
+        dir_flags:
+          fs_wal_dir: "/data/efs/tserver-wal"
+          fs_metadata_dir: "/data/efs/tserver-meta"
+          fs_data_dirs: "/mntd/tserver-data"
+          log_dir: "/mntd/tserver-logs"
     masters:
       hosts:
-        - "ec2-efs"
+        - "ec2-efs-perf"
+      dir_flags:
+        fs_wal_dir: "/mntd/master-wal"
+        fs_metadata_dir: "/mntd/master-meta"
+        fs_data_dirs: "/mntd/master-data"
+        log_dir: "/mntd/master-logs"
+
+  ec2-efs-general:
+    tservers:
+      - hosts:
+          # Must be an entry in `hosts`.
+          - "ec2-efs-gen1"
+        dir_flags:
+          fs_wal_dir: "/data/efs-general/tserver-wal"
+          fs_metadata_dir: "/data/efs-general/tserver-meta"
+          fs_data_dirs: "/mntd/tserver-data"
+          log_dir: "/mntd/tserver-logs"
+    masters:
+      hosts:
+        - "ec2-efs-gen1"
       dir_flags:
         fs_wal_dir: "/mntd/master-wal"
         fs_metadata_dir: "/mntd/master-meta"
@@ -117,9 +172,6 @@ clusters:
         fs_metadata_dir: "/mntd/tserver-meta"
         fs_data_dirs: "/mntd/tserver-data"
         log_dir: "/mntd/tserver-logs"
-      flags:
-        - "--unlock_unsafe_flags=true"
-        - "--enable_maintenance_manager=false"
     masters:
       hosts:
         - "ec2-xl"
@@ -129,21 +181,3 @@ clusters:
         fs_data_dirs: "/mntd/master-data"
         log_dir: "/mntd/master-logs"
 
-  medium-machine:
-    masters:
-      hosts:
-        - "medium"
-      dir_flags:
-        fs_wal_dir: "/data/master-wal"
-        fs_metadata_dir: "/data/master-meta"
-        fs_data_dirs: "/data/master-data"
-        log_dir: "/data/master-logs"
-
-    tservers:
-      hosts:
-        - "ec2-ephemeral"
-      dir_flags:
-        fs_wal_dir: "/home/ec2-user/efs/tserver-wal"
-        fs_metadata_dir: "/data/tserver-meta"
-        fs_data_dirs: "/data/tserver-data"
-        log_dir: "/data/tserver-logs"

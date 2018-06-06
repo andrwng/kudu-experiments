@@ -54,7 +54,7 @@ DEFAULT_RATE_METRICS = [
 DEFAULT_HISTOGRAM_METRICS = [
   ("tablet.bloom_lookups_per_op", "bloom_lookups"),
   ("server.rpc_incoming_queue_time", "rpc_queue_time"),
-  ("server.handler_latency_kudu_tserver_TabletServerService_Write", "write"),
+  ("server.handler_latency_kudu_tserver_TabletServerService_Write", "write_latency_us"),
   ("tablet.op_prepare_queue_length", "prepare_queue_length"),
   ("tablet.log_append_latency", "log_append_us"),
   ("server.op_apply_queue_length", "apply_queue_length"),

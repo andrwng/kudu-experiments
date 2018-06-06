@@ -9,13 +9,17 @@ sudo yum -y install autoconf automake cyrus-sasl-devel cyrus-sasl-gssapi \
 
 sudo yum -y install nfs-utils
 
-if [[ ! -d $MOUNTPOINT ]]; then
+sudo fdisk -l
+
+if [[ -z $(sudo df -h | grep $DEVICE) ]]; then
+  sudo rm -rf $MOUNTPOINT || true
   sudo mkdir $MOUNTPOINT
   sudo mkfs.ext4 $DEVICE
   sudo mount -t ext4 $DEVICE $MOUNTPOINT
 fi
 
-if [[ ! -d $EFS_MOUNTPOINT ]]; then
+if [[ -z $(sudo df -h | grep $EFS_IP) ]]; then
+  sudo rm -rf $EFS_MOUNTPOINT || true
   sudo mkdir $EFS_MOUNTPOINT
   sudo mount -t nfs -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport $EFS_IP:/   $EFS_MOUNTPOINT
 fi

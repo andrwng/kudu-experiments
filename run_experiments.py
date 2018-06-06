@@ -95,12 +95,13 @@ class Servers(object):
 
     # Runs the binary files across all servers.
     def start(self, server_flags, port, polling_interval=None):
-        extra_flags = ["--block_manager=file", "--trusted_subnets=0.0.0.0/0"]
+        extra_flags = ["--block_manager=log", "--trusted_subnets=0.0.0.0/0"]
         flags_str = " ".join(self.dir_flags + server_flags + extra_flags)
         if "flags" in self.config:
             flags_str += " " + " ".join(self.config["flags"])
         if polling_interval:
-          flags_str += " --metrics_polling_interval_ms={}".format(polling_interval * 1000)
+          flags_str += " --unlock_experimental_flags=true " + \
+              " --diagnostics_log_stack_traces_interval_ms={}".format(polling_interval * 1000)
         # Some extra flags need to be added per server; namely:
         # - the advertised address for RPCs
         # - the KUDU_HOME directory for each server
@@ -162,18 +163,23 @@ class Servers(object):
 class Cluster(object):
     def __init__(self, config):
         self.config = config
-        self.tservers = Servers("kudu-tserver", self.config['tservers'])
+        if type(self.config['tservers']) is dict:
+            self.tservers = [Servers("kudu-tserver", self.config['tservers'])]
+        else:
+            self.tservers = [Servers("kudu-tserver", ts_config) \
+                for ts_config in self.config['tservers']]
         self.masters = Servers("kudu-master", self.config['masters'])
         self.master_addrs = ",".join(["{}:7051".format(a) for a, _ in self.masters.addresses_and_bin])
         self.cluster_env = os.environ.copy()
         self.cluster_env["KUDU_MASTERS"] = self.master_addrs
-        self.cluster_env["PATH"] += os.pathsep + BASE_OPTS["kudu_sbin_dir"]
+        self.cluster_env["PATH"] = BASE_OPTS["kudu_sbin_dir"] + os.pathsep + self.cluster_env["PATH"]
 
     # Set up the masters and tablet servers, creating the appropriate
     # directories necessary to start the cluster.
     def setup_servers(self):
         self.masters.setup()
-        self.tservers.setup()
+        for ts in self.tservers:
+            ts.setup()
 
     # Start the servers and wait for them to come online.
     def start_servers(self, tserver_polling_interval=None):
@@ -185,7 +191,8 @@ class Cluster(object):
 
         logging.info("Starting tservers")
         tserver_flags = ["--tserver_master_addrs={}".format(self.master_addrs)]
-        self.tservers.start(tserver_flags, "8050", tserver_polling_interval)
+        for ts in self.tservers:
+            ts.start(tserver_flags, "8050", tserver_polling_interval)
 
     # Collect the metrics cluster-wide and place them in the local directory
     # 'dir_name'. 'dir_name' must already exist.
@@ -197,7 +204,8 @@ class Cluster(object):
 
         tservers_log_dir = os.path.join(metrics_dir, "tservers")
         subprocess.check_output(["mkdir", "-p", tservers_log_dir])
-        self.tservers.collect_metrics(tservers_log_dir)
+        for ts in self.tservers:
+            ts.collect_metrics(tservers_log_dir)
 
     # Run a command, with cluster-specific environment variables set.
     def run_workload(self, cmd, timeout=None):
@@ -216,7 +224,8 @@ class Cluster(object):
     def stop_servers(self):
         logging.info("Stopping servers")
         self.masters.stop()
-        self.tservers.stop()
+        for ts in self.tservers:
+            ts.stop()
 
 
 # Returns a paramiko client connected to `address`. Searches through `SECRETS`
@@ -293,7 +302,7 @@ def send_recursively(sftp_client, src, dst):
 
 # Setting up a host entails sending over any necessary binary files,
 # scripts, and running host setup scripts to install dependencies and such.
-def setup_host(host_config):
+def setup_host(host_config, resend_bins):
     setup_script = host_config["setup_script"]
     address = host_config["address"]
     setup_env_str = ""
@@ -305,8 +314,11 @@ def setup_host(host_config):
     client = connect_to_host(address)
     sftp_client = client.open_sftp()
 
-    # Create the remote bin dir.
+    # Create the remote bin dir, wiping it if requested.
     remote_bin_dir = host_config["bin_dir"]
+    if resend_bins:
+        exec_and_log(client, "sudo rm -rf {}".format(remote_bin_dir))
+
     if not remote_file_exists(sftp_client, remote_bin_dir):
         exec_and_log(client, "sudo mkdir -p {}".format(remote_bin_dir))
 
@@ -359,9 +371,15 @@ def load_configs(setup_yaml, cluster_filter):
         for mname in config["masters"]["hosts"]:
             if mname not in relevant_hosts.keys():
                 relevant_hosts[mname] = host_configs[mname]
-        for tname in config["tservers"]["hosts"]:
-            if tname not in relevant_hosts.keys():
-                relevant_hosts[tname] = host_configs[tname]
+        if type(config["tservers"]) is dict:
+            for tname in config["tservers"]["hosts"]:
+                if tname not in relevant_hosts.keys():
+                    relevant_hosts[tname] = host_configs[tname]
+        else:
+            for ts_config in config["tservers"]:
+                for tname in ts_config["hosts"]:
+                    if tname not in relevant_hosts.keys():
+                        relevant_hosts[tname] = host_configs[tname]
 
     return relevant_hosts, relevant_clusters
 
@@ -383,6 +401,10 @@ def main():
         dest="cluster_filter",
         type=str, default=".*",
         help="Regex pattern used to filter which clusters to run against")
+    p.add_argument("--resend-bins",
+        dest="resend_bins",
+        action="store_true",
+        help="Whether to wipe the current binaries and resend them. Helpful if updating setup scripts")
     args = p.parse_args()
     setup_yaml = yaml.load(file(args.setup_yaml_path))
 
@@ -401,7 +423,7 @@ def main():
     # necessary bootstrapping scripts.
     for hname, config in HOST_CONFIGS.iteritems():
         logging.info("Setting up host {}".format(hname))
-        setup_host(config)
+        setup_host(config, args.resend_bins)
 
     # Initialize the specified clusters. Note that this doesn't make any
     # connections; it just sets up in-memory state.
@@ -425,7 +447,7 @@ def main():
             cluster.setup_servers()
 
             # Run the Kudu binaries.
-            cluster.start_servers()
+            cluster.start_servers(30)
 
             # Runs the workload locally, adding the KUDU_HOME and
             # WORKLOAD_TIMEOUT environment variables.
